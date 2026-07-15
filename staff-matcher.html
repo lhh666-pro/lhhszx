@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人员信息匹配工具</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg: #F0F4F8;
+  --surface: #FFFFFF;
+  --planned: #4F46E5;
+  --planned-light: #EEF2FF;
+  --planned-border: #C7D2FE;
+  --actual: #0D9488;
+  --actual-light: #F0FDFA;
+  --actual-border: #99F6E4;
+  --match: #16A34A;
+  --match-light: #F0FDF4;
+  --text: #1E293B;
+  --text-secondary: #64748B;
+  --text-tertiary: #94A3B8;
+  --border: #E2E8F0;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.03);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.container {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 40px 24px 60px;
+}
+
+/* ── Header ── */
+.header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+.header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--planned) 0%, #7C3AED 100%);
+  color: white;
+  font-size: 24px;
+  margin-bottom: 18px;
+  box-shadow: 0 8px 20px rgba(79,70,229,0.25);
+}
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.header p {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 560px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+/* ── Zones Grid ── */
+.zones {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0;
+  margin-bottom: 32px;
+  align-items: start;
+  position: relative;
+}
+@media (max-width: 760px) {
+  .zones {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+  }
+}
+
+/* ── Bridge ── */
+.bridge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 14px;
+  padding-top: 52px;
+  gap: 8px;
+  min-width: 64px;
+}
+@media (max-width: 760px) {
+  .bridge {
+    flex-direction: row;
+    padding: 8px 0;
+    justify-content: center;
+    gap: 10px;
+  }
+}
+.bridge-line {
+  width: 2px;
+  height: 36px;
+  background: var(--border);
+  border-radius: 1px;
+  transition: background 0.5s ease;
+}
+@media (max-width: 760px) {
+  .bridge-line { width: 36px; height: 2px; }
+}
+.bridge-line.active {
+  background: var(--match);
+}
+.bridge-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: all 0.5s ease;
+  position: relative;
+  flex-shrink: 0;
+}
+.bridge-dot.ready {
+  background: var(--match);
+  box-shadow: 0 0 0 6px rgba(22,163,74,0.15);
+  animation: pulse 2s ease-in-out infinite;
+}
+.bridge-dot.partial {
+  background: var(--text-tertiary);
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0.25); }
+  50% { box-shadow: 0 0 0 12px rgba(22,163,74,0); }
+}
+.bridge-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  letter-spacing: 0.05em;
+}
+
+/* ── Drop Zone ── */
+.drop-zone {
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px 20px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.drop-zone:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+.drop-zone.planned {
+  border-left: 4px solid var(--planned);
+}
+.drop-zone.actual {
+  border-left: 4px solid var(--actual);
+}
+.drop-zone.drag-over {
+  border-style: solid;
+  transform: scale(1.02);
+  box-shadow: var(--shadow-lg);
+}
+.drop-zone.planned.drag-over {
+  border-color: var(--planned);
+  background: var(--planned-light);
+}
+.drop-zone.actual.drag-over {
+  border-color: var(--actual);
+  background: var(--actual-light);
+}
+.drop-zone.loaded {
+  border-style: solid;
+  padding: 16px 16px 14px;
+  cursor: default;
+  align-items: stretch;
+  text-align: left;
+}
+.drop-zone.planned.loaded {
+  border-color: var(--planned-border);
+  background: var(--planned-light);
+}
+.drop-zone.actual.loaded {
+  border-color: var(--actual-border);
+  background: var(--actual-light);
+}
+
+/* ── Zone Default (empty state) ── */
+.zone-default {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: center;
+}
+.drop-zone.loaded .zone-default { display: none; }
+.zone-default .zone-icon {
+  font-size: 38px;
+  line-height: 1;
+  opacity: 0.9;
+  transition: transform 0.2s ease;
+}
+.drop-zone:hover .zone-default .zone-icon {
+  transform: translateY(-3px);
+}
+.zone-default .zone-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.zone-default .zone-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.zone-default .zone-subhint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  margin-top: -2px;
+}
+
+/* ── Zone Loaded State ── */
+.zone-loaded { display: none; }
+.drop-zone.loaded .zone-loaded { display: flex; flex-direction: column; gap: 8px; }
+.zone-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.zone-summary .zone-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-right: 6px;
+}
+.zone-badge.planned-badge {
+  background: var(--planned);
+  color: white;
+}
+.zone-badge.actual-badge {
+  background: var(--actual);
+  color: white;
+}
+
+/* ── File list (planned multi-file) ── */
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.file-chip {
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 12px;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  transition: box-shadow 0.15s;
+}
+.file-chip:hover {
+  box-shadow: var(--shadow);
+}
+.file-chip .chip-icon {
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+.file-chip .chip-info {
+  flex: 1;
+  min-width: 0;
+}
+.file-chip .chip-name {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-chip .chip-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.file-chip .chip-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.file-chip .chip-remove:hover {
+  background: #FEE2E2;
+  color: #DC2626;
+}
+
+/* ── Planned add-more button ── */
+.zone-add-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px dashed var(--planned-border);
+  border-radius: 8px;
+  color: var(--planned);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: all 0.15s;
+  background: transparent;
+  font-family: inherit;
+  width: 100%;
+}
+.zone-add-more:hover {
+  background: var(--surface);
+  border-style: solid;
+}
+
+/* ── Actual single-file loaded ── */
+.actual-file-card {
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 14px;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+}
+.actual-file-card .file-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--actual);
+}
+.actual-file-card .actual-info {
+  flex: 1;
+  min-width: 0;
+}
+.actual-file-card .actual-name {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.actual-file-card .actual-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.actual-file-card .actual-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.actual-file-card .actual-remove:hover {
+  background: #FEE2E2;
+  color: #DC2626;
+}
+
+.zone-cols-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 0 2px;
+}
+
+/* ── File Input (hidden) ── */
+.file-input { display: none; }
+
+/* ── Results Area ── */
+.results {
+  display: none;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: slideUp 0.35s ease;
+}
+.results.visible { display: block; }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.results-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.results-header h3 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* ── Stats ── */
+.stats {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.stat.matched .stat-value { color: var(--match); }
+.stat.skipped .stat-value { color: var(--text-tertiary); }
+.stat.unmatched .stat-value { color: #F59E0B; }
+
+/* ── Table Wrapper ── */
+.table-wrapper {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+thead th {
+  background: #F8FAFC;
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #F1F5F9;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+tbody tr:hover { background: #F8FAFC; }
+tbody tr.row-matched { background: var(--match-light); }
+tbody tr.row-matched:hover { background: #DCFCE7; }
+td.cell-filled {
+  background: #DCFCE7;
+  color: var(--match);
+  font-weight: 500;
+  position: relative;
+  border-radius: 4px;
+}
+td.cell-filled::after {
+  content: '✓';
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  opacity: 0.5;
+  padding-left: 4px;
+}
+
+/* ── Actions ── */
+.actions {
+  padding: 16px 24px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--radius-xs);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  font-family: inherit;
+}
+.btn-primary {
+  background: var(--planned);
+  color: white;
+  box-shadow: 0 2px 8px rgba(79,70,229,0.3);
+}
+.btn-primary:hover {
+  background: #4338CA;
+  box-shadow: 0 4px 12px rgba(79,70,229,0.4);
+  transform: translateY(-1px);
+}
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  background: #F8FAFC;
+  border-color: #CBD5E1;
+}
+.btn-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btn-small:hover {
+  background: #F8FAFC;
+  border-color: #CBD5E1;
+}
+
+/* ── Error Banner ── */
+.error-banner {
+  display: none;
+  padding: 14px 18px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: var(--radius-sm);
+  color: #991B1B;
+  font-size: 14px;
+  margin-bottom: 20px;
+  align-items: center;
+  gap: 10px;
+  animation: slideUp 0.25s ease;
+}
+.error-banner.visible { display: flex; }
+.error-banner .error-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: #991B1B;
+  opacity: 0.6;
+  line-height: 1;
+  padding: 0 4px;
+}
+.error-banner .error-close:hover { opacity: 1; }
+
+/* ── Processing Overlay ── */
+.processing {
+  display: none;
+  text-align: center;
+  padding: 48px 24px;
+}
+.processing.visible { display: block; }
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--planned);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.processing p {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* ── Footer ── */
+.footer {
+  text-align: center;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.footer p {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.8;
+}
+
+/* ── Responsive ── */
+@media (max-width: 760px) {
+  .container { padding: 24px 16px 40px; }
+  .header h1 { font-size: 22px; }
+  .header p { font-size: 14px; }
+  .drop-zone { padding: 24px 14px 16px; min-height: 180px; }
+  .drop-zone.loaded { padding: 14px 12px 12px; }
+  .zone-default .zone-icon { font-size: 30px; }
+  .stats { gap: 14px; }
+  .stat-value { font-size: 18px; }
+  table { font-size: 12px; }
+  thead th, tbody td { padding: 8px 10px; }
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon">&#8644;</div>
+    <h1>人员信息匹配工具</h1>
+    <p>将多个计划人员表中的工程名称和企业名称，按身份证或姓名自动回填到实际签到表中</p>
+  </div>
+
+  <!-- Error Banner -->
+  <div class="error-banner" id="errorBanner">
+    <span id="errorMsg"></span>
+    <button class="error-close" onclick="dismissError()">&times;</button>
+  </div>
+
+  <!-- Drop Zones -->
+  <div class="zones">
+
+    <!-- Planned Zone (multi-file) -->
+    <div class="drop-zone planned" id="plannedZone"
+         ondragover="handleDragOver(event, 'planned')"
+         ondragleave="handleDragLeave(event)"
+         ondrop="handleDrop(event, 'planned')"
+         onclick="handleZoneClick('planned')">
+      <!-- Empty state -->
+      <div class="zone-default">
+        <div class="zone-icon">&#128203;</div>
+        <div class="zone-title">拖入计划人员表</div>
+        <div class="zone-hint">可同时拖入多个文件</div>
+        <div class="zone-subhint">不同企业的表格可一起拖入</div>
+      </div>
+      <!-- Loaded state -->
+      <div class="zone-loaded" onclick="event.stopPropagation()">
+        <div class="zone-summary" id="plannedSummary"></div>
+        <div class="file-list" id="plannedFileList"></div>
+        <button class="zone-add-more" onclick="event.stopPropagation(); document.getElementById('plannedInput').click()">
+          + 添加更多计划表
+        </button>
+        <div class="zone-cols-hint" id="plannedColsHint"></div>
+      </div>
+    </div>
+    <input type="file" class="file-input" id="plannedInput" accept=".xlsx,.xls" multiple onchange="handleFileSelect(event, 'planned')">
+
+    <!-- Bridge -->
+    <div class="bridge">
+      <div class="bridge-line" id="bridgeLine"></div>
+      <div class="bridge-dot" id="bridgeDot"></div>
+      <div class="bridge-label" id="bridgeLabel">匹配引擎</div>
+    </div>
+
+    <!-- Actual Zone (single file) -->
+    <div class="drop-zone actual" id="actualZone"
+         ondragover="handleDragOver(event, 'actual')"
+         ondragleave="handleDragLeave(event)"
+         ondrop="handleDrop(event, 'actual')"
+         onclick="handleZoneClick('actual')">
+      <!-- Empty state -->
+      <div class="zone-default">
+        <div class="zone-icon">&#128202;</div>
+        <div class="zone-title">拖入实际签到表</div>
+        <div class="zone-hint">Actual — 工程名称或企业名称可能为空</div>
+        <div class="zone-subhint">仅需一个文件</div>
+      </div>
+      <!-- Loaded state -->
+      <div class="zone-loaded" onclick="event.stopPropagation()">
+        <div class="zone-summary"><span class="zone-badge actual-badge">实际表</span></div>
+        <div class="actual-file-card" id="actualFileCard">
+          <span class="file-dot"></span>
+          <div class="actual-info">
+            <div class="actual-name" id="actualFileName"></div>
+            <div class="actual-meta" id="actualFileMeta"></div>
+          </div>
+          <button class="actual-remove" onclick="removeActualFile(event)" title="移除">&#10005;</button>
+        </div>
+        <div class="zone-cols-hint" id="actualColsHint"></div>
+      </div>
+    </div>
+    <input type="file" class="file-input" id="actualInput" accept=".xlsx,.xls" onchange="handleFileSelect(event, 'actual')">
+  </div>
+
+  <!-- Processing -->
+  <div class="processing" id="processing">
+    <div class="spinner"></div>
+    <p>正在匹配数据…</p>
+  </div>
+
+  <!-- Results -->
+  <div class="results" id="results">
+    <div class="results-header">
+      <h3>匹配结果</h3>
+      <div class="stats" id="statsContainer"></div>
+    </div>
+    <div class="table-wrapper" id="tableWrapper"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="downloadBtn" onclick="downloadResult()">&#10515; 下载匹配结果 (.xlsx)</button>
+      <button class="btn btn-secondary" onclick="resetAll()">&#8634; 重新开始</button>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>所有数据在浏览器本地处理，不会上传到任何服务器</p>
+    <p>支持 .xlsx 和 .xls 格式 &middot; 计划表可多个 &middot; 实际表一个 &middot; 自动识别身份证号、姓名、工程名称、企业名称列</p>
+  </div>
+
+</div>
+
+<script>
+/* ================================================================
+   人员信息匹配引擎 — 纯客户端实现，基于 SheetJS
+   Planned 区域支持多文件，Actual 区域单文件
+   ================================================================ */
+
+// ── 状态 ──
+const state = {
+  planned: [],   // [{ name, rowCount, data, headers, cols }] — 支持多个文件
+  actual: null,  // { name, rowCount, data, headers, cols } — 单个文件
+  result: null,
+};
+
+// ── 列名映射 ──
+const ID_NAMES = ['身份证号码', '身份证号', '身份证', 'ID', '证件号码'];
+const NAME_NAMES = ['姓名', '名字', '人员姓名'];
+const PROJECT_NAMES = ['工程名称', '工程', '项目名称', '项目'];
+const COMPANY_NAMES = ['企业名称', '企业', '公司名称', '公司', '单位名称', '单位'];
+
+function findColIndex(headers, candidates) {
+  return headers.findIndex(h => candidates.includes(h));
+}
+
+function normalizeId(val) {
+  if (val === undefined || val === null || val === '') return '';
+  return String(val).trim().toUpperCase().replace(/[^0-9X]/g, '');
+}
+
+function normalizeStr(val) {
+  if (val === undefined || val === null) return '';
+  return String(val).trim();
+}
+
+function isEmpty(val) {
+  if (val === undefined || val === null) return true;
+  const s = String(val).trim();
+  return s === '' || s === 'nan' || s === 'NaN' || s === 'null' || s === 'undefined';
+}
+
+// ── File extension validator ──
+function isExcelFile(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  return ['xlsx', 'xls'].includes(ext);
+}
+
+// ── 文件拖放 ──
+function handleDragOver(e, zone) {
+  e.preventDefault();
+  e.stopPropagation();
+  const el = document.getElementById(zone + 'Zone');
+  el.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+}
+
+function handleDrop(e, zone) {
+  e.preventDefault();
+  e.stopPropagation();
+  const el = document.getElementById(zone + 'Zone');
+  el.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length === 0) return;
+
+  if (zone === 'actual') {
+    // Actual: 只取第一个
+    loadFile(files[0], 'actual');
+  } else {
+    // Planned: 全部处理
+    const excelFiles = files.filter(f => isExcelFile(f.name));
+    if (excelFiles.length !== files.length) {
+      showError('部分文件不是 Excel 格式（.xlsx / .xls），已跳过');
+    }
+    if (excelFiles.length === 0) return;
+    dismissError();
+    hideResults();
+    processPlannedFiles(excelFiles);
+  }
+}
+
+function handleZoneClick(zone) {
+  if (zone === 'actual' && state.actual) return; // 已有文件时不触发选择
+  document.getElementById(zone + 'Input').click();
+}
+
+function handleFileSelect(e, zone) {
+  const files = Array.from(e.target.files);
+  e.target.value = '';
+  if (files.length === 0) return;
+
+  if (zone === 'actual') {
+    loadFile(files[0], 'actual');
+  } else {
+    const excelFiles = files.filter(f => isExcelFile(f.name));
+    if (excelFiles.length === 0) {
+      showError('未选择任何 Excel 文件');
+      return;
+    }
+    dismissError();
+    hideResults();
+    processPlannedFiles(excelFiles);
+  }
+}
+
+// ── 批量处理 Planned 文件 ──
+function processPlannedFiles(files) {
+  let pending = files.length;
+  let hasError = false;
+
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const parsed = parseExcelData(e.target.result, file.name);
+        if (parsed) {
+          // 避免重复添加同名文件
+          const exists = state.planned.findIndex(p => p.name === file.name);
+          if (exists >= 0) {
+            state.planned[exists] = parsed;
+          } else {
+            state.planned.push(parsed);
+          }
+        }
+      } catch (err) {
+        hasError = true;
+        showError('读取 ' + file.name + ' 失败：' + err.message);
+        console.error(err);
+      }
+      pending--;
+      if (pending === 0) {
+        finishPlannedLoad();
+      }
+    };
+    reader.onerror = function() {
+      showError('无法读取文件：' + file.name);
+      pending--;
+      if (pending === 0) finishPlannedLoad();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function finishPlannedLoad() {
+  if (state.planned.length === 0) {
+    showError('没有成功加载任何计划表文件');
+    return;
+  }
+  updatePlannedUI();
+  updateBridge();
+  if (state.actual) runMatch();
+}
+
+// ── 加载单文件（Actual） ──
+function loadFile(file, zone) {
+  dismissError();
+  hideResults();
+
+  if (!isExcelFile(file.name)) {
+    showError('请上传 Excel 文件（.xlsx 或 .xls），当前文件：' + file.name);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const parsed = parseExcelData(e.target.result, file.name);
+      if (!parsed) return;
+      state[zone] = parsed;
+      updateActualUI();
+      updateBridge();
+      if (state.planned.length > 0 && state.actual) runMatch();
+    } catch (err) {
+      showError('读取文件失败：' + err.message);
+      console.error(err);
+    }
+  };
+  reader.onerror = function() {
+    showError('无法读取文件：' + file.name);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── 解析 Excel 数据 ──
+function parseExcelData(arrayBuffer, filename) {
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+  const sheetName = wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+
+  if (!rows || rows.length < 2) {
+    showError(filename + ' 中没有足够的数据（至少需要表头和一行数据）');
+    return null;
+  }
+
+  return parseSheet(rows, filename);
+}
+
+function parseSheet(rows, filename) {
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(3, rows.length); i++) {
+    const headers = rows[i].map(c => normalizeStr(c));
+    const hasName = headers.some(h => NAME_NAMES.includes(h));
+    const hasId = headers.some(h => ID_NAMES.includes(h));
+    if (hasName || hasId) { headerIdx = i; break; }
+  }
+
+  const headers = rows[headerIdx].map(c => normalizeStr(c));
+  const cols = {
+    id: findColIndex(headers, ID_NAMES),
+    name: findColIndex(headers, NAME_NAMES),
+    project: findColIndex(headers, PROJECT_NAMES),
+    company: findColIndex(headers, COMPANY_NAMES),
+  };
+
+  if (cols.id === -1 && cols.name === -1) {
+    showError(filename + ' 中未找到身份证号或姓名列。识别到的列：' + headers.join(', '));
+    return null;
+  }
+
+  const data = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.every(c => isEmpty(c))) continue;
+    data.push(row);
+  }
+
+  if (data.length === 0) {
+    showError(filename + ' 中没有数据行');
+    return null;
+  }
+
+  return { name: filename, rowCount: data.length, data, headers, cols };
+}
+
+// ── 获取列名用于显示 ──
+function getColNames(cols) {
+  const names = [];
+  if (cols.id !== -1) names.push('身份证');
+  if (cols.name !== -1) names.push('姓名');
+  if (cols.project !== -1) names.push('工程名称');
+  if (cols.company !== -1) names.push('企业名称');
+  return names;
+}
+
+// ── 更新 Planned UI（多文件） ──
+function updatePlannedUI() {
+  const zone = document.getElementById('plannedZone');
+  const totalRows = state.planned.reduce((sum, f) => sum + f.rowCount, 0);
+  const totalFiles = state.planned.length;
+
+  zone.classList.add('loaded');
+
+  // 汇总
+  document.getElementById('plannedSummary').innerHTML =
+    '<span class="zone-badge planned-badge">' + totalFiles + ' 个计划表</span>共 ' + totalRows + ' 条人员记录';
+
+  // 文件列表
+  let listHtml = '';
+  for (let i = 0; i < state.planned.length; i++) {
+    const f = state.planned[i];
+    listHtml +=
+      '<div class="file-chip">' +
+        '<span class="chip-icon">&#128196;</span>' +
+        '<div class="chip-info">' +
+          '<div class="chip-name">' + escapeHtml(f.name) + '</div>' +
+          '<div class="chip-meta">' + f.rowCount + ' 行 &middot; ' + getColNames(f.cols).join('、') + '</div>' +
+        '</div>' +
+        '<button class="chip-remove" onclick="removePlannedFile(' + i + ', event)" title="移除">&#10005;</button>' +
+      '</div>';
+  }
+  document.getElementById('plannedFileList').innerHTML = listHtml;
+
+  // 列提示（取第一个文件的列）
+  document.getElementById('plannedColsHint').textContent =
+    '识别列：' + getColNames(state.planned[0].cols).join('、');
+}
+
+// ── 移除单个 Planned 文件 ──
+function removePlannedFile(index, event) {
+  event.stopPropagation();
+  state.planned.splice(index, 1);
+  state.result = null;
+  hideResults();
+
+  if (state.planned.length === 0) {
+    document.getElementById('plannedZone').classList.remove('loaded');
+    document.getElementById('plannedFileList').innerHTML = '';
+    document.getElementById('plannedColsHint').textContent = '';
+  } else {
+    updatePlannedUI();
+  }
+  updateBridge();
+}
+
+// ── 更新 Actual UI（单文件） ──
+function updateActualUI() {
+  const zone = document.getElementById('actualZone');
+  const f = state.actual;
+  zone.classList.add('loaded');
+  document.getElementById('actualFileName').textContent = f.name;
+  document.getElementById('actualFileMeta').textContent = f.rowCount + ' 行';
+  document.getElementById('actualColsHint').textContent = '识别列：' + getColNames(f.cols).join('、');
+}
+
+// ── 移除 Actual 文件 ──
+function removeActualFile(event) {
+  event.stopPropagation();
+  state.actual = null;
+  state.result = null;
+  document.getElementById('actualZone').classList.remove('loaded');
+  hideResults();
+  updateBridge();
+}
+
+// ── 更新桥接指示器 ──
+function updateBridge() {
+  const dot = document.getElementById('bridgeDot');
+  const line = document.getElementById('bridgeLine');
+  const label = document.getElementById('bridgeLabel');
+
+  dot.classList.remove('ready', 'partial');
+  line.classList.remove('active');
+
+  if (state.planned.length > 0 && state.actual) {
+    dot.classList.add('ready');
+    line.classList.add('active');
+    label.textContent = '匹配就绪';
+  } else if (state.planned.length > 0 || state.actual) {
+    dot.classList.add('partial');
+    label.textContent = '等待另一侧';
+  } else {
+    label.textContent = '匹配引擎';
+  }
+}
+
+// ── 核心匹配逻辑 ──
+function runMatch() {
+  document.getElementById('processing').classList.add('visible');
+
+  setTimeout(() => {
+    try {
+      const actualInfo = state.actual;
+      const ac = actualInfo.cols;
+
+      // 从所有 Planned 文件构建查找字典
+      const lookupById = {};
+      const lookupByName = {};
+
+      for (const plannedInfo of state.planned) {
+        const pc = plannedInfo.cols;
+        for (const row of plannedInfo.data) {
+          const id = normalizeId(row[pc.id !== -1 ? pc.id : 0]);
+          const name = normalizeStr(row[pc.name !== -1 ? pc.name : 0]);
+          const project = pc.project !== -1 ? normalizeStr(row[pc.project]) : '';
+          const company = pc.company !== -1 ? normalizeStr(row[pc.company]) : '';
+
+          if (id && !lookupById[id]) {
+            lookupById[id] = { project, company, name };
+          }
+          if (name && !lookupByName[name]) {
+            lookupByName[name] = { project, company, id };
+          }
+        }
+      }
+
+      // 处理 Actual 数据
+      const resultHeaders = [...actualInfo.headers];
+      const resultData = [];
+      let matched = 0, skipped = 0, unmatched = 0;
+      const highlightCells = [];
+
+      for (const row of actualInfo.data) {
+        const id = ac.id !== -1 ? normalizeId(row[ac.id]) : '';
+        const name = ac.name !== -1 ? normalizeStr(row[ac.name]) : '';
+
+        const hasProject = ac.project !== -1 && !isEmpty(row[ac.project]);
+        const hasCompany = ac.company !== -1 && !isEmpty(row[ac.company]);
+
+        const newRow = [...row];
+        let rowMatched = false;
+
+        if (hasProject && hasCompany) {
+          skipped++;
+        } else {
+          let match = (id && lookupById[id]) || (name && lookupByName[name]) || null;
+
+          if (match) {
+            if (ac.project !== -1 && !hasProject) {
+              newRow[ac.project] = match.project;
+              highlightCells.push({ row: resultData.length, col: ac.project });
+            }
+            if (ac.company !== -1 && !hasCompany) {
+              newRow[ac.company] = match.company;
+              highlightCells.push({ row: resultData.length, col: ac.company });
+            }
+            matched++;
+            rowMatched = true;
+          } else {
+            unmatched++;
+          }
+        }
+
+        newRow._matched = rowMatched;
+        newRow._skipped = hasProject && hasCompany;
+        resultData.push(newRow);
+      }
+
+      state.result = {
+        headers: resultHeaders,
+        data: resultData,
+        highlightCells,
+        stats: { matched, skipped, unmatched },
+        actualCols: ac,
+      };
+
+      renderResults();
+    } catch (err) {
+      showError('匹配过程出错：' + err.message);
+      console.error(err);
+    }
+    document.getElementById('processing').classList.remove('visible');
+  }, 100);
+}
+
+// ── 渲染结果 ──
+function renderResults() {
+  const { headers, data, highlightCells, stats } = state.result;
+  const results = document.getElementById('results');
+  const tableWrapper = document.getElementById('tableWrapper');
+  const statsContainer = document.getElementById('statsContainer');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  statsContainer.innerHTML =
+    '<div class="stat matched"><span class="stat-value">' + stats.matched + '</span><span class="stat-label">人已匹配</span></div>' +
+    '<div class="stat skipped"><span class="stat-value">' + stats.skipped + '</span><span class="stat-label">人已有数据</span></div>' +
+    '<div class="stat unmatched"><span class="stat-value">' + stats.unmatched + '</span><span class="stat-label">人未匹配</span></div>';
+
+  const highlightSet = new Set(highlightCells.map(h => h.row + ':' + h.col));
+
+  let html = '<table><thead><tr>';
+  for (const h of headers) {
+    html += '<th>' + escapeHtml(h) + '</th>';
+  }
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const rowClass = row._matched ? ' row-matched' : '';
+    html += '<tr class="' + rowClass + '">';
+    for (let j = 0; j < headers.length; j++) {
+      const isFilled = highlightSet.has(i + ':' + j);
+      const cellClass = isFilled ? ' cell-filled' : '';
+      html += '<td class="' + cellClass + '">' + escapeHtml(String(row[j] !== undefined ? row[j] : '')) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  tableWrapper.innerHTML = html;
+
+  if (stats.matched === 0 && stats.skipped === 0) {
+    downloadBtn.textContent = '⚠ 无匹配数据可下载';
+    downloadBtn.disabled = true;
+    downloadBtn.style.opacity = '0.5';
+  } else {
+    downloadBtn.textContent = '⬇ 下载匹配结果 (.xlsx)';
+    downloadBtn.disabled = false;
+    downloadBtn.style.opacity = '1';
+  }
+
+  results.classList.add('visible');
+}
+
+// ── 下载结果 ──
+function downloadResult() {
+  if (!state.result) return;
+  const { headers, data } = state.result;
+
+  const exportData = [headers];
+  for (const row of data) {
+    const cleanRow = [];
+    for (let j = 0; j < headers.length; j++) {
+      cleanRow.push(row[j] !== undefined ? row[j] : '');
+    }
+    exportData.push(cleanRow);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(exportData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '匹配结果');
+  XLSX.writeFile(wb, '[已匹配]_结果.xlsx');
+}
+
+// ── 重置 ──
+function resetAll() {
+  state.planned = [];
+  state.actual = null;
+  state.result = null;
+
+  document.getElementById('plannedZone').classList.remove('loaded');
+  document.getElementById('plannedFileList').innerHTML = '';
+  document.getElementById('plannedColsHint').textContent = '';
+  document.getElementById('actualZone').classList.remove('loaded');
+  document.getElementById('actualColsHint').textContent = '';
+
+  updateBridge();
+  hideResults();
+  dismissError();
+}
+
+function hideResults() {
+  document.getElementById('results').classList.remove('visible');
+}
+
+// ── Error ──
+function showError(msg) {
+  document.getElementById('errorMsg').textContent = msg;
+  document.getElementById('errorBanner').classList.add('visible');
+}
+
+function dismissError() {
+  document.getElementById('errorBanner').classList.remove('visible');
+}
+
+// ── HTML 转义 ──
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
