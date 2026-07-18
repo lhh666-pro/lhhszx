@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>人员信息匹配工具</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root {
   --bg: #F0F4F8;
@@ -1266,24 +1267,221 @@ function renderResults() {
   results.classList.add('visible');
 }
 
-// ── 下载结果 ──
+// ── 下载结果（带完整格式：宋体、边框、表头灰底） ──
 function downloadResult() {
   if (!state.result) return;
   const { headers, data } = state.result;
 
-  const exportData = [headers];
+  // 构建干净数据
+  const cleanData = [];
   for (const row of data) {
     const cleanRow = [];
     for (let j = 0; j < headers.length; j++) {
-      cleanRow.push(row[j] !== undefined ? row[j] : '');
+      cleanRow.push(row[j] !== undefined ? String(row[j]) : '');
     }
-    exportData.push(cleanRow);
+    cleanData.push(cleanRow);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(exportData);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '匹配结果');
-  XLSX.writeFile(wb, '[已匹配]_结果.xlsx');
+  const sheetName = '匹配结果';
+  const colCount = headers.length;
+  const rowCount = cleanData.length;
+
+  // ── 收集共享字符串 ──
+  const ssMap = new Map();
+  const ssList = [];
+  function ssIndex(val) {
+    const s = String(val);
+    if (ssMap.has(s)) return ssMap.get(s);
+    const idx = ssList.length;
+    ssList.push(s);
+    ssMap.set(s, idx);
+    return idx;
+  }
+  // 预收集所有表头和数据
+  for (const h of headers) ssIndex(h);
+  for (const row of cleanData) {
+    for (const v of row) ssIndex(v);
+  }
+
+  // ── 辅助函数 ──
+  function colLetter(n) {
+    let s = '';
+    while (n >= 0) {
+      s = String.fromCharCode(65 + (n % 26)) + s;
+      n = Math.floor(n / 26) - 1;
+    }
+    return s;
+  }
+
+  function xmlEscape(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+
+  // ── 计算列宽（自适应内容长度，中文字符算2） ──
+  function calcWidth(text, isHeader) {
+    let w = 0;
+    for (const ch of String(text)) {
+      w += (ch.charCodeAt(0) > 127) ? 2.2 : 1.1;
+    }
+    return Math.max(isHeader ? 8 : 6, Math.min(w + 3, 40));
+  }
+  const colWidths = [];
+  for (let c = 0; c < colCount; c++) {
+    let maxW = calcWidth(headers[c], true);
+    for (let r = 0; r < rowCount; r++) {
+      maxW = Math.max(maxW, calcWidth(cleanData[r][c], false));
+    }
+    colWidths.push(maxW);
+  }
+
+  // ── 构建 styles.xml ──
+  // Font 0: 宋体 11 (data default)
+  // Font 1: 宋体 14 bold (header)
+  // Fill 0: none; Fill 1: gray125 (required); Fill 2: solid indexed 22 (header fill)
+  // Border 0: none; Border 1: thin all sides
+  // cellXf 0: default
+  // cellXf 1: header (font 1, fill 2, border 1, center/center, wrap)
+  // cellXf 2: data (font 0, fill 0, border 1, vertical center)
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="11"/><name val="宋体"/></font>
+    <font><b/><sz val="14"/><name val="宋体"/></font>
+  </fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor indexed="22"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color auto="1"/></left>
+      <right style="thin"><color auto="1"/></right>
+      <top style="thin"><color auto="1"/></top>
+      <bottom style="thin"><color auto="1"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="3">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">
+      <alignment horizontal="center" vertical="center" wrapText="1"/>
+    </xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1">
+      <alignment vertical="center"/>
+    </xf>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  // ── 构建 sharedStrings.xml ──
+  let sstXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  sstXml += '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' + ssList.length + '" uniqueCount="' + ssList.length + '">';
+  for (const s of ssList) {
+    sstXml += '<si><t xml:space="preserve">' + xmlEscape(s) + '</t></si>';
+  }
+  sstXml += '</sst>';
+
+  // ── 构建 sheet1.xml ──
+  let sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  sheetXml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  sheetXml += '<sheetViews><sheetView workbookViewId="0"><pane yOffset="1" xSplit="0" ySplit="1" state="frozen" activePane="bottomLeft"/></sheetView></sheetViews>';
+
+  // 列宽
+  sheetXml += '<cols>';
+  for (let c = 0; c < colCount; c++) {
+    const letter = colLetter(c);
+    sheetXml += '<col min="' + (c + 1) + '" max="' + (c + 1) + '" width="' + colWidths[c].toFixed(1) + '" customWidth="1"/>';
+  }
+  sheetXml += '</cols>';
+
+  // 表头行
+  sheetXml += '<sheetData>';
+  sheetXml += '<row r="1" ht="20" customHeight="1">';
+  for (let c = 0; c < colCount; c++) {
+    const letter = colLetter(c);
+    const idx = ssIndex(headers[c]);
+    sheetXml += '<c r="' + letter + '1" s="1" t="s"><v>' + idx + '</v></c>';
+  }
+  sheetXml += '</row>';
+
+  // 数据行
+  for (let r = 0; r < rowCount; r++) {
+    const rowNum = r + 2;
+    sheetXml += '<row r="' + rowNum + '" ht="20" customHeight="1">';
+    for (let c = 0; c < colCount; c++) {
+      const letter = colLetter(c);
+      const val = cleanData[r][c];
+      if (val !== '') {
+        const idx = ssIndex(val);
+        sheetXml += '<c r="' + letter + rowNum + '" s="2" t="s"><v>' + idx + '</v></c>';
+      } else {
+        sheetXml += '<c r="' + letter + rowNum + '" s="2"/>';
+      }
+    }
+    sheetXml += '</row>';
+  }
+
+  sheetXml += '</sheetData>';
+  sheetXml += '<autoFilter ref="A1:' + colLetter(colCount - 1) + (rowCount + 1) + '"/>';
+  sheetXml += '</worksheet>';
+
+  // ── 构建 workbook.xml ──
+  const workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets><sheet name="' + xmlEscape(sheetName) + '" sheetId="1" r:id="rId1"/></sheets></workbook>';
+
+  // ── 辅助 XML ──
+  const contentTypeXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
+    '</Types>';
+
+  const relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>';
+
+  const wbRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+    '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
+    '</Relationships>';
+
+  // ── 打包 ZIP ──
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', contentTypeXml);
+  zip.file('_rels/.rels', relsXml);
+  zip.file('xl/workbook.xml', workbookXml);
+  zip.file('xl/_rels/workbook.xml.rels', wbRelsXml);
+  zip.file('xl/worksheets/sheet1.xml', sheetXml);
+  zip.file('xl/styles.xml', stylesXml);
+  zip.file('xl/sharedStrings.xml', sstXml);
+
+  // ── 生成 Blob 并下载 ──
+  zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    .then(function(blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '[已匹配]_结果.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .catch(function(err) {
+      showError('生成文件失败：' + err.message);
+      console.error(err);
+    });
 }
 
 // ── 重置 ──
